@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basketball Online - Deluxe Edition</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        body { background: #0b0c10; color: #fff; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; user-select: none; }
+
+        .screen { position: relative; z-index: 10; display: none; width: 1000px; height: 600px; background: rgba(18, 18, 24, 0.95); border: 2px solid #ff9800; border-radius: 12px; box-shadow: 0 0 30px rgba(0,0,0,0.8); overflow: hidden; }
+        .screen.active { display: flex; flex-direction: column; }
+
+        /* AUTH */
+        .auth-card { width: 380px; margin: auto; padding: 30px; background: rgba(0,0,0,0.6); border-radius: 10px; border: 1px solid #ff9800; text-align: center; }
+        .form-group input { width: 100%; padding: 12px; margin: 15px 0; background: #1f2833; border: 1px solid #45a29e; border-radius: 6px; color: #fff; text-align: center; font-size: 16px; outline: none; }
+
+        .btn { padding: 12px 20px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; text-transform: uppercase; transition: 0.2s; }
+        .btn-main { background: #66fcf1; color: #0b0c10; width: 100%; }
+        .btn-main:hover { background: #45a29e; }
+        .btn-shop { background: #ff9800; color: #fff; }
+
+        /* LOBBY & SHOP */
+        .lobby-container { display: flex; height: 100%; padding: 20px; gap: 20px; }
+        .lobby-main { flex: 2; display: flex; flex-direction: column; justify-content: space-between; background: rgba(0,0,0,0.3); padding: 20px; border-radius: 8px; }
+        .lobby-sidebar { flex: 1; background: rgba(0,0,0,0.4); padding: 20px; border-radius: 8px; display: flex; flex-direction: column; gap: 15px; }
+
+        .shop-modal { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11, 12, 16, 0.95); z-index: 50; display: none; flex-direction: column; padding: 20px; }
+        .shop-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 20px; }
+        .shop-card { background: #1f2833; padding: 15px; border-radius: 8px; border: 1px solid #45a29e; text-align: center; }
+        .shop-card h4 { color: #66fcf1; margin-bottom: 10px; }
+
+        /* OVERLAY HIỆU ỨNG TRẬN ĐẤU */
+        #game-screen { position: relative; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        .overlay-banner { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 48px; font-weight: 900; color: #ffeb3b; text-shadow: 0 0 20px #ff9800, 0 0 10px #000; pointer-events: none; opacity: 0; transition: transform 0.4s ease, opacity 0.4s ease; z-index: 100; }
+        .overlay-banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+        .hud-score { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 10px 25px; border-radius: 20px; border: 1px solid #ff9800; font-size: 20px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<!-- 1. ĐĂNG NHẬP -->
+<div id="auth-screen" class="screen active">
+    <div class="auth-card">
+        <h2 style="color: #66fcf1;">BASKETBALL ONLINE</h2>
+        <div class="form-group">
+            <input type="text" id="usernameInput" placeholder="Nhập Username của bạn...">
+        </div>
+        <button class="btn btn-main" onclick="connectOnline()">VÀO GAME</button>
+    </div>
+</div>
+
+<!-- 2. LOBBY & SHOP -->
+<div id="lobby-screen" class="screen">
+    <div class="lobby-container">
+        <div class="lobby-main">
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2>🌐 PHÒNG CHỜ TỔ ĐỘI</h2>
+                    <button class="btn btn-shop" onclick="openShop()">🛍️ CỬA HÀNG SHOP</button>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <h3>CHẾ ĐỘ THI ĐẤU:</h3>
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <button class="btn btn-main" onclick="selectMode(1)">1v1 Online</button>
+                        <button class="btn btn-main" onclick="selectMode(2)">2v2 Online</button>
+                        <button class="btn btn-main" onclick="selectMode(3)">3v3 Online</button>
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 25px;">DANH SÁCH TỔ ĐỘI:</h3>
+                <div id="memberList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px;"></div>
+            </div>
+
+            <button id="btnFindMatch" class="btn btn-main" style="padding: 18px; font-size: 18px;" onclick="toggleMatchmaking()">🔍 TÌM TRẬN NGẪU NHIÊN TOÀN SERVER</button>
+        </div>
+
+        <div class="lobby-sidebar">
+            <h3>✉️ MỜI BẠN BÈ</h3>
+            <input type="text" id="inviteUsernameInput" placeholder="Username..." style="padding: 8px; border-radius: 4px; border: none;">
+            <button class="btn btn-main" onclick="sendInvite()">GỬI LỜI MỜI</button>
+            <div style="margin-top: auto;">
+                Coins: <b id="coinDisplay" style="color: #ffeb3b;">1000</b>💰<br>
+                Mã Phòng: <b id="displayLobbyId" style="color: #66fcf1;">-</b>
+            </div>
+        </div>
+    </div>
+
+    <!-- SHOP MODAL -->
+    <div id="shopModal" class="shop-modal">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2>🛍️ CỬA HÀNG TRANG TRÍ</h2>
+            <button class="btn btn-shop" onclick="closeShop()">ĐÓNG</button>
+        </div>
+        <div class="shop-grid">
+            <div class="shop-card">
+                <h4>Sân Neon Cyborg</h4>
+                <p>100 Coins</p><br>
+                <button class="btn btn-main" onclick="buyItem('court', 'neon', 100)">MUA / TRANG BỊ</button>
+            </div>
+            <div class="shop-card">
+                <h4>Quả Bóng Fireball</h4>
+                <p>150 Coins</p><br>
+                <button class="btn btn-main" onclick="buyItem('ball', 'fireball', 150)">MUA / TRANG BỊ</button>
+            </div>
+            <div class="shop-card">
+                <h4>Trang Phục Cyber Suit</h4>
+                <p>200 Coins</p><br>
+                <button class="btn btn-main" onclick="buyItem('player', 'cyber', 200)">MUA / TRANG BỊ</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 3. GAMEPLAY -->
+<div id="game-screen" class="screen">
+    <div id="banner" class="overlay-banner">READY!</div>
+    <div class="hud-score">
+        <span id="scoreBlue" style="color: #2196f3;">0</span> : <span id="scoreRed" style="color: #f44336;">0</span>
+    </div>
+    <canvas id="gameCanvas" width="1000" height="600"></canvas>
+</div>
+
+<script>
+let socket, myUsername, mySocketId, currentLobby, coins = 1000;
+let mySkins = { court: 'classic', ball: 'classic', player: 'classic' };
+
+function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+}
+
+function connectOnline() {
+    myUsername = document.getElementById('usernameInput').value.trim();
+    if (!myUsername) return alert("Nhập Username!");
+
+    socket = io();
+    socket.on('connect', () => socket.emit('registerUser', myUsername));
+    
+    socket.on('registered', (data) => {
+        mySocketId = data.socketId;
+        coins = data.coins;
+        document.getElementById('coinDisplay').innerText = coins;
+        showScreen('lobby-screen');
+        socket.emit('createLobby', 1);
+    });
+
+    socket.on('lobbyUpdated', (lobby) => {
+        currentLobby = lobby;
+        document.getElementById('displayLobbyId').innerText = lobby.id;
+        const list = document.getElementById('memberList');
+        list.innerHTML = '';
+        lobby.members.forEach(m => {
+            list.innerHTML += `<div style="background: rgba(255,255,255,0.1); padding: 8px; border-radius: 4px;">👤 <b>${m.username}</b> ${m.id === lobby.host ? '👑' : ''}</div>`;
+        });
+    });
+
+    socket.on('alert', msg => alert(msg));
+    socket.on('itemPurchased', data => {
+        coins = data.coins;
+        mySkins[data.type] = data.id;
+        document.getElementById('coinDisplay').innerText = coins;
+        alert("Trang bị thành công!");
+    });
+
+    socket.on('matchFound', gameData => {
+        showScreen('game-screen');
+        startMatch(gameData);
+    });
+
+    socket.on('remotePlayerMove', data => {
+        if (remotePlayers[data.id]) {
+            Object.assign(remotePlayers[data.id], data);
+        }
+    });
+
+    socket.on('ballShot', data => triggerShotAnimation(data));
+    socket.on('kickoffReset', data => executeKickoff(data));
+}
+
+function openShop() { document.getElementById('shopModal').style.display = 'flex'; }
+function closeShop() { document.getElementById('shopModal').style.display = 'none'; }
+function buyItem(type, id, price) { socket.emit('buyItem', { type, id, price }); }
+function selectMode(m) { socket.emit('createLobby', m); }
+function sendInvite() { socket.emit('invitePlayer', document.getElementById('inviteUsernameInput').value.trim()); }
+function toggleMatchmaking() { socket.emit('startMatchmaking'); }
+
+/* --- GAME ENGINE COMPLETE --- */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const COURT = { x: 80, y: 70, w: 840, h: 460 };
+const HOOP_LEFT = { x: 120, y: 300 };
+const HOOP_RIGHT = { x: 880, y: 300 };
+
+let localPlayer = null, remotePlayers = {}, ball = null;
+let keys = {}, score = { blue: 0, red: 0 };
+
+window.addEventListener('keydown', e => {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key.toLowerCase() === 'q' && localPlayer) triggerDribble();
+    if (e.code === 'Space' && localPlayer && ball.holderId === localPlayer.id) shootBall();
+});
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+// 1. KỸ NĂNG DRIBBLE (PHÍM Q)
+function triggerDribble() {
+    if (localPlayer.isDribbling) return;
+    localPlayer.isDribbling = true;
+    localPlayer.speed = 8; // Tăng tốc bứt phá
+    
+    setTimeout(() => {
+        localPlayer.speed = 4;
+        localPlayer.isDribbling = false;
+    }, 600);
+}
+
+// 2. KHỞI TẠO TRẬN ĐẤU & HIỆU ỨNG MỞ ĐẦU
+function startMatch(gameData) {
+    remotePlayers = {};
+    score = { blue: 0, red: 0 };
+    updateScoreUI();
+
+    gameData.teamBlue.forEach((p, i) => {
+        const isMe = p.id === mySocketId;
+        const pObj = { id: p.id, name: p.username, team: 'blue', x: COURT.x + 150, y: COURT.y + 100 + i * 100, z: 0, speed: 4, skin: p.skin, facing: 0, isDribbling: false };
+        if (isMe) localPlayer = pObj; else remotePlayers[p.id] = pObj;
+    });
+
+    gameData.teamRed.forEach((p, i) => {
+        const isMe = p.id === mySocketId;
+        const pObj = { id: p.id, name: p.username, team: 'red', x: COURT.x + COURT.w - 150, y: COURT.y + 100 + i * 100, z: 0, speed: 4, skin: p.skin, facing: 0, isDribbling: false };
+        if (isMe) localPlayer = pObj; else remotePlayers[p.id] = pObj;
+    });
+
+    ball = { x: 500, y: 300, z: 0, vx: 0, vy: 0, vz: 0, holderId: null, skin: gameData.teamBlue[0]?.ballSkin || 'classic' };
+
+    // Hiệu ứng mở đầu (Banner intro)
+    showBanner("MATCH START!", 1500, () => {
+        requestAnimationFrame(gameLoop);
+    });
+}
+
+// 3. CODE NÉM BÓNG & ANIMATION RƠI VÀO RỔ
+function shootBall() {
+    const targetHoop = localPlayer.team === 'blue' ? HOOP_RIGHT : HOOP_LEFT;
+    const dx = targetHoop.x - localPlayer.x;
+    const dy = targetHoop.y - localPlayer.y;
+
+    socket.emit('shootBall', {
+        startX: localPlayer.x, startY: localPlayer.y,
+        targetX: targetHoop.x, targetY: targetHoop.y,
+        shooterTeam: localPlayer.team
+    });
+}
+
+function triggerShotAnimation(data) {
+    ball.holderId = null;
+    ball.x = data.startX; ball.y = data.startY; ball.z = 10;
+    
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += 0.04;
+        ball.x = data.startX + (data.targetX - data.startX) * progress;
+        ball.y = data.startY + (data.targetY - data.startY) * progress;
+        ball.z = Math.sin(progress * Math.PI) * 120; // Quỹ đạo cầu vồng 3D
+
+        if (progress >= 1) {
+            clearInterval(interval);
+            // ANIMATION BÓNG RƠI VÀO RỔ
+            playSwishAnimation(data.targetX, data.targetY, () => {
+                score[data.shooterTeam]++;
+                updateScoreUI();
+                checkWinCondition(data.shooterTeam);
+                // Tự động Kick-off chuyển giao bóng cho đội còn lại
+                triggerAutomaticKickoff(data.shooterTeam === 'blue' ? 'red' : 'blue');
+            });
+        }
+    }, 20);
+}
+
+function playSwishAnimation(x, y, callback) {
+    let dropZ = 60;
+    const anim = setInterval(() => {
+        dropZ -= 5;
+        ball.z = dropZ;
+        if (dropZ <= 0) {
+            clearInterval(anim);
+            if (callback) callback();
+        }
+    }, 16);
+}
+
+// 4. KICK-OFF TỰ ĐỘNG KHI RA NGOÀI HOẶC SAU KHI BÀN THẮNG
+function checkOutOfBounds() {
+    if (ball.holderId) return;
+    if (ball.x < COURT.x || ball.x > COURT.x + COURT.w || ball.y < COURT.y || ball.y > COURT.y + COURT.h) {
+        if (localPlayer && mySocketId === currentLobby?.host) {
+            // Đội vừa làm bóng ra ngoài bị mất bóng
+            const lastTouchTeam = localPlayer.team;
+            const nextTeam = lastTouchTeam === 'blue' ? 'red' : 'blue';
+            socket.emit('triggerKickoff', { nextTeam });
+        }
+    }
+}
+
+function triggerAutomaticKickoff(nextTeam) {
+    if (localPlayer && mySocketId === currentLobby?.host) {
+        socket.emit('triggerKickoff', { nextTeam });
+    }
+}
+
+function executeKickoff(data) {
+    showBanner(`KICK OFF: TEAM ${data.nextTeam.toUpperCase()}`, 1000);
+    ball.x = 500; ball.y = 300; ball.z = 0;
+    
+    // Tìm cầu thủ thuộc đội được trao bóng để gán holder
+    const targetPlayer = Object.values({ ...remotePlayers, [localPlayer.id]: localPlayer })
+        .find(p => p.team === data.nextTeam);
+    
+    if (targetPlayer) {
+        ball.holderId = targetPlayer.id;
+        targetPlayer.x = 500; targetPlayer.y = 320;
+    }
+}
+
+// 5. KẾT THÚC TRẬN ĐẤU (OUTRO)
+function checkWinCondition(team) {
+    if (score[team] >= 5) {
+        showBanner(`TEAM ${team.toUpperCase()} WIN!`, 3000, () => {
+            showScreen('lobby-screen');
+        });
+    }
+}
+
+function showBanner(text, duration, callback) {
+    const banner = document.getElementById('banner');
+    banner.innerText = text;
+    banner.classList.add('show');
+    setTimeout(() => {
+        banner.classList.remove('show');
+        if (callback) callback();
+    }, duration);
+}
+
+function updateScoreUI() {
+    document.getElementById('scoreBlue').innerText = score.blue;
+    document.getElementById('scoreRed').innerText = score.red;
+}
+
+/* --- RENDER LOOP --- */
+function updateLocal() {
+    if (!localPlayer) return;
+    let dx = 0, dy = 0;
+    if (keys['w'] || keys['arrowup']) dy -= 1;
+    if (keys['s'] || keys['arrowdown']) dy += 1;
+    if (keys['a'] || keys['arrowleft']) dx -= 1;
+    if (keys['d'] || keys['arrowright']) dx += 1;
+
+    if (dx !== 0 || dy !== 0) {
+        localPlayer.x += dx * localPlayer.speed;
+        localPlayer.y += dy * localPlayer.speed;
+        localPlayer.facing = Math.atan2(dy, dx);
+
+        if (ball.holderId === localPlayer.id) {
+            ball.x = localPlayer.x + Math.cos(localPlayer.facing) * 15;
+            ball.y = localPlayer.y + Math.sin(localPlayer.facing) * 15;
+        }
+
+        socket.emit('playerMove', {
+            x: localPlayer.x, y: localPlayer.y, z: localPlayer.z,
+            facing: localPlayer.facing, isDribbling: localPlayer.isDribbling
+        });
+    }
+    checkOutOfBounds();
+}
+
+function drawCourt() {
+    ctx.fillStyle = mySkins.court === 'neon' ? '#0f051d' : '#cf9b52';
+    ctx.fillRect(COURT.x, COURT.y, COURT.w, COURT.h);
+    ctx.strokeStyle = mySkins.court === 'neon' ? '#00f6ff' : '#ffffff';
+    ctx.lineWidth = 4; ctx.strokeRect(COURT.x, COURT.y, COURT.w, COURT.h);
+
+    // Rổ bóng
+    ctx.fillStyle = '#ff5722';
+    ctx.fillRect(HOOP_LEFT.x - 10, HOOP_LEFT.y - 25, 10, 50);
+    ctx.fillRect(HOOP_RIGHT.x, HOOP_RIGHT.y - 25, 10, 50);
+}
+
+function drawPlayer(p, isMe) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+
+    // Hiệu ứng Dribble bóng (Bóng đổ bóng mờ)
+    if (p.isDribbling) {
+        ctx.fillStyle = 'rgba(102, 252, 241, 0.4)';
+        ctx.beginPath(); ctx.arc(-5, -5, 18, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Body Nhân Vật
+    ctx.fillStyle = p.skin === 'cyber' ? '#9c27b0' : (p.team === 'blue' ? '#2196f3' : '#f44336');
+    ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = isMe ? '#66fcf1' : '#fff'; ctx.lineWidth = 3; ctx.stroke();
+
+    // Hướng nhìn
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(Math.cos(p.facing) * 10 - 3, Math.sin(p.facing) * 10 - 3, 6, 6);
+
+    ctx.restore();
+}
+
+function drawBall() {
+    ctx.save();
+    ctx.translate(ball.x, ball.y - ball.z);
+    
+    // Bóng đổ (Shadow) 3D bên dưới
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.arc(0, ball.z, 10, 0, Math.PI * 2); ctx.fill();
+
+    // Quả bóng
+    ctx.fillStyle = ball.skin === 'fireball' ? '#ff3d00' : '#ff9800';
+    ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5; ctx.stroke();
+
+    ctx.restore();
+}
+
+function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawCourt();
+
+    updateLocal();
+    if (localPlayer) drawPlayer(localPlayer, true);
+    Object.values(remotePlayers).forEach(p => drawPlayer(p, false));
+    drawBall();
+
+    requestAnimationFrame(gameLoop);
+}
+</script>
+</body>
+</html>
